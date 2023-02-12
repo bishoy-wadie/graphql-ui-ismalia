@@ -1,12 +1,13 @@
 const express = require("express");
 const app = express();
-const port = 3000;
+const port = 8000;
 const { buildSchema } = require("graphql");
 const { graphqlHTTP } = require("express-graphql");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const User = require("./models/User");
 const Post = require("./models/Post");
+const Comment = require("./models/Comment");
 require("./connection");
 const secret = "mysecret";
 
@@ -18,11 +19,7 @@ const secret = "mysecret";
 // on getting post : comments
 
 const schema = buildSchema(`
-	type Post {
-		title:String!
-		content:String!
-		user:User
-	}
+	
 	type User {
 		name:String!
 		email:String!
@@ -33,16 +30,35 @@ const schema = buildSchema(`
 		email:String!
 		password:String!
 	}
+  type comment{
+    content:String,
+    postId:Post,
+    userId:User
+  }
+  type Post {
+		title:String!
+		content:String!
+		user:User,
+    comments:[comment]
+	}
 	type Query {
 		test:String
 		usersGetAll:[User!]!
 		userGetOne(id:ID!):User!
-		getMyPosts(token:String!):[Post!]!
+		getMyPosts(token:String!):[Post!]!,
+    getOnePost(token:String!,postId:ID!):Post!
+    getComment(token:String!,postId:ID!,commentId:ID!):comment
+    getAllComments(token:String!,postId:ID!):[comment!]
 	}
 	type Mutation {
 		userCreate(input:UserInput):User
 		userLogin(email:String!,password:String!):String
 		postCreate(title:String!,content:String!,token:String!):String
+		updatePost(token:String!,postId:ID!,title:String,content:String):String
+    deletePost(token:String!,postId:ID!):String
+    createComment(token:String!,postId:ID!,content:String!):String
+    updateComment( token:String!, postId:ID!, commentId:ID!,content:String!):String
+    deleteComment(token:String!, postId:ID!, commentId:ID!):String
 	}
 `);
 const userQueries = {
@@ -95,6 +111,17 @@ const postQueries = {
     console.log("posts", posts);
     return posts.map((post) => ({ ...post._doc, user: post.userId }));
   },
+  getOnePost: async ({ token, postId }) => {
+    const user = await auth(token);
+    const post = await Post.findOne({ _id: postId, userId: user.id }).populate(
+      "comments"
+    );
+    console.log(post);
+    if (!post) {
+      return "post not found";
+    }
+    return post;
+  },
 };
 const postMutations = {
   postCreate: async ({ title, content, token }) => {
@@ -104,7 +131,6 @@ const postMutations = {
     await post.save();
     return "post created";
   },
-
   updatePost: async ({ title, content, token, postId }) => {
     const user = await auth(token);
     const post = await Post.findOneAndUpdate(
@@ -113,18 +139,17 @@ const postMutations = {
       { new: true }
     );
     if (!post) {
-      return "Post is not found";
+      return "post not found";
     }
-    return "Post updated successfully";
+    return "update successfully";
   },
-
   deletePost: async ({ token, postId }) => {
     const user = await auth(token);
     const post = await Post.findOneAndDelete({ _id: postId, userId: user.id });
     if (!post) {
-      return "Post is not found";
+      return "post not found";
     }
-    return "Post deleted successfully";
+    return "post delete successfully";
   },
 };
 
@@ -137,7 +162,7 @@ const commentsQuires = {
       _id: commentId,
     }).populate("postId userId");
     if (!comment) {
-      return "Comment not found";
+      return "not found";
     }
     return comment;
   },
@@ -159,7 +184,7 @@ const commentMutation = {
       postId,
       userId: user.id,
     });
-    return "Comment Created successfully";
+    return "comment created suceesfully";
   },
   updateComment: async ({ token, postId, commentId, content }) => {
     const user = await auth(token);
@@ -174,7 +199,7 @@ const commentMutation = {
     if (!comment) {
       return "not found";
     }
-    return "Comment updated successfully";
+    return "update success";
   },
   deleteComment: async ({ token, postId, commentId }) => {
     const user = await auth(token);
@@ -186,14 +211,17 @@ const commentMutation = {
     if (!comment) {
       return "not found";
     }
-    return "Comment deleted successfully";
+    return "delete success";
   },
 };
+
 const resolvers = {
   ...userQueries,
   ...userMutations,
   ...postQueries,
   ...postMutations,
+  ...commentMutation,
+  ...commentsQuires,
 };
 app.use(
   "/graphql",
